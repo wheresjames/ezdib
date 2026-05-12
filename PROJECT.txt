@@ -1,0 +1,8 @@
+name            ezdib
+version         1.0.1
+description     Small, self contained C library for creating and drawing into BMP images.
+company         wheresjames
+author          Robert Umbehant
+email           ezdib@wheresjames.com
+url             https://github.com/wheresjames/ezdib
+license         MIT
