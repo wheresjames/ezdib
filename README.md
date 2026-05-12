@@ -7,10 +7,26 @@ or anywhere in between — with zero mandatory external dependencies.
 
 ---
 
+## Table of Contents
+
+- [Features](#features)
+- [Example](#example)
+- [Quick Start](#quick-start)
+- [Building the Example](#building-the-example)
+- [Core Concepts](#core-concepts)
+- [API Reference](#api-reference)
+- [Compile-time options](#compile-time-options)
+- [Using your own pixel buffer](#using-your-own-pixel-buffer)
+- [Custom pixel callback (unbuffered output)](#custom-pixel-callback-unbuffered-output)
+- [Graph helpers](#graph-helpers)
+- [License](#license)
+
+---
+
 ## Features
 
 - **Single-header + single-source** — drop `ezdib.h` and `ezdib.c` into your project and you're done
-- **Three pixel formats**: 1 bpp monochrome, 24 bpp RGB, 32 bpp RGBA/packed
+- **Three pixel formats**: 1 bpp monochrome, 24 bpp RGB, 32 bpp packed RGB with an unused high byte
 - **Drawing primitives**: pixels, lines, rectangles (outline and fill), circles, arcs, flood fill
 - **Image scaling** with three quality modes: nearest-neighbour, bilinear, and area averaging
 - **Bitmap font rendering** with two built-in fonts (small and medium) and support for custom font maps
@@ -28,10 +44,10 @@ or anywhere in between — with zero mandatory external dependencies.
 ## Example
 
 ### 1 BPP (1-bit) image
-![grplist performance guide](images/rt-1.png)
+![Example 1 bpp ezdib output](images/rt-1.png)
 
 ### 32 BPP (32-bit) image
-![grplist performance guide](images/rt-32.png)
+![Example 32 bpp ezdib output](images/rt-32.png)
 
 ---
 
@@ -111,7 +127,7 @@ For verbose output on any failure:
 ctest --test-dir build --output-on-failure
 ```
 
-The suite contains 66 tests covering image lifecycle, all drawing
+The suite contains 69 tests covering image lifecycle, all drawing
 primitives, font rendering, image scaling, math utilities, and
 robustness (NULL handles, out-of-bounds coordinates, unsupported formats).
 Each test is registered individually with CTest so failures are pinpointed
@@ -142,8 +158,10 @@ int black = 0x000000;
 Pass a **negative height** to `ezd_create` or `ezd_initialize` to store
 the image top-down (origin at top-left, y increases downward), which is
 the natural orientation for screen coordinates.  A positive height stores
-the image bottom-up, which is the default for BMP files.  All drawing
-functions use the same coordinate system regardless of the sign.
+the image bottom-up, which is the default for BMP files.  Pixel and shape
+drawing use the same coordinate system regardless of the sign.  Text
+rendering also accounts for image orientation; use `EZD_FONT_FLAG_INVERT`
+if you need to flip the glyph row direction explicitly.
 
 ```c
 HEZDIMAGE top_down   = ezd_create(640, -480, 24, 0);  /* y=0 is top */
@@ -193,8 +211,12 @@ of `malloc`.  Useful on systems without dynamic allocation.  The buffer
 must be at least `EZD_HEADER_SIZE` (128) bytes, or the exact value
 returned by `ezd_header_size()`.
 
-The pixel data is stored separately; either appended after the header
-by the normal `ezd_create` path, or supplied via `ezd_set_image_buffer`.
+If `EZD_FLAG_USER_IMAGE_BUFFER` is set, `ezd_initialize` only needs the
+header buffer and the pixel data must be supplied later with
+`ezd_set_image_buffer()` or a pixel callback.  Without that flag, the
+caller-owned buffer must also include room for the image data immediately
+after the internal header (`ezd_header_size() + EZD_IMAGE_SIZE(width,
+height, bpp, 4)`).
 
 #### `ezd_destroy`
 
@@ -225,9 +247,10 @@ with unusual alignment rules.
 ### Drawing primitives
 
 All drawing functions accept an `HEZDIMAGE` handle and an integer color
-value.  They all return non-zero on success and zero on failure (invalid
-parameters or out-of-range coordinates).  Coordinates that fall outside
-the image are silently clipped.
+value.  They return non-zero on success and zero on failure.  Invalid
+handles, missing buffers, unsupported formats, or out-of-range single
+pixel operations fail.  Multi-pixel primitives generally clip to the
+image bounds; a fully off-screen line is treated as a successful no-op.
 
 #### `ezd_set_pixel` / `ezd_get_pixel`
 
@@ -276,8 +299,9 @@ int ezd_fill_rect(HEZDIMAGE img, int x1, int y1, int x2, int y2, int color);
 
 `ezd_rect` draws the four edges of a rectangle by calling `ezd_line`.
 
-`ezd_fill_rect` fills the interior.  The first scan line is filled using
-a doubling-copy strategy: one pixel is written by hand, then repeatedly
+`ezd_fill_rect` fills the rectangle, including both endpoint coordinates.
+The first scan line is filled using a doubling-copy strategy: one pixel is
+written by hand, then repeatedly
 `memcpy`'d to fill 2, 4, 8 … pixels until the row is complete.  This
 reaches the full `memcpy` throughput in O(log width) passes rather than a
 per-pixel loop.  Subsequent rows are copied from the first row with a
@@ -316,14 +340,13 @@ Draws a circular arc from `start_angle` to `end_angle` (in radians,
 measured clockwise from the positive x-axis).
 
 **Algorithm:**
-The arc is sampled at `4π × radius` evenly spaced angle steps — enough
-that adjacent pixels are at most one pixel apart with no gaps.  Rather
-than computing `sin`/`cos` from scratch at every step, the code uses
-**incremental rotation** (also called the
-[digital differential analyzer](https://en.wikipedia.org/wiki/Digital_differential_analyzer_(graphics))
-approach for curves): it precomputes the sin and cosine of a single
-small step angle, then rotates the current direction vector by that angle
-each iteration using the identities:
+The arc is sampled at `4π × radius` evenly spaced angle steps.  Rather
+than computing `sin`/`cos` from scratch at every step, the code uses an
+incremental rotation approach related to
+[digital differential analyzer rasterization](https://en.wikipedia.org/wiki/Digital_differential_analyzer_%28graphics_algorithm%29):
+it precomputes the sin and cosine of a single small step angle, then
+rotates the current direction vector by that angle each iteration using
+the identities:
 
 ```
 cos(a + da) = cos(a)·cos(da) − sin(a)·sin(da)
@@ -431,11 +454,12 @@ All channel values and weights are accumulated in `long long` to handle
 large scale-down ratios without overflow (safe up to roughly 4096×4096
 source images).
 
-This is equivalent to applying an ideal
+This is equivalent to applying a
 [box filter](https://en.wikipedia.org/wiki/Box_blur) before sampling,
-which eliminates aliasing entirely.  It is the best choice whenever the
-destination is smaller than the source.  When the destination is larger
-(upscaling), this mode automatically falls back to bilinear.
+which reduces aliasing when shrinking an image.  It is the best choice
+whenever the destination is smaller than the source.  When both
+destination dimensions are at least as large as the source dimensions,
+this mode automatically falls back to bilinear.
 
 ```c
 /* Load a large photo, produce a 128×128 thumbnail */
@@ -482,6 +506,8 @@ HEZDFONT f = ezd_load_font(EZD_FONT_TYPE_MEDIUM, 0, 0);
 
 `flags` may include `EZD_FONT_FLAG_INVERT` to flip the rendering
 direction (useful when combining with a positive-height image).
+Custom font tables must pass a positive `table_size` so malformed input
+can be rejected without reading beyond the supplied buffer.
 
 **Font table format:**
 Each glyph entry is: `[char_code, width, height, bitmap_bytes…]`.
@@ -604,8 +630,8 @@ ezd_circle(img, 64, 32, 20, 0x00ff00);
 ```
 
 The callback receives the character value of the current font glyph in
-the `flags` field during text rendering — useful for ASCII-art fonts that
-want to know which character is being drawn at each position.
+the `flags` field during text rendering.  Other drawing calls currently
+pass `0` for that field.
 
 ---
 
@@ -623,22 +649,25 @@ double ezd_calc_range(int type, void *data, int count,
                       double *min_out, double *max_out, double *total_out);
 ```
 
-`ezd_calc_range` scans an array of any supported numeric type (see the
-`EZD_TYPE_*` constants) and returns the minimum, maximum, and sum.
+`ezd_calc_range` scans an array of a supported numeric type and returns
+the minimum, maximum, and sum.
 
 `ezd_scale_value` maps one element of the array from the source range
 into a destination range — useful for projecting data values onto pixel
 coordinates.
 
-`type` encodes the C element type using the `EZD_TYPE_*` macros:
-`EZD_TYPE_INT`, `EZD_TYPE_FLOAT`, `EZD_TYPE_DOUBLE`, etc.
+`type` must be one of the implemented `EZD_TYPE_*` constants:
+`EZD_TYPE_CHAR`, `EZD_TYPE_UCHAR`, `EZD_TYPE_SHORT`, `EZD_TYPE_USHORT`,
+`EZD_TYPE_INT`, `EZD_TYPE_UINT`, `EZD_TYPE_LONGLONG`,
+`EZD_TYPE_ULONGLONG`, `EZD_TYPE_FLOAT`, or `EZD_TYPE_DOUBLE`.
 
 ---
 
 ## License
 
-BSD-style license — see the header of `ezdib.h` for the full text.
-Redistribution in source and binary forms is permitted for commercial and
-non-commercial use, provided the copyright notice is retained.
+BSD-style license — see `LICENSE` and the header of `ezdib.h` for the
+full text.  Redistribution in source and binary forms is permitted for
+commercial and non-commercial use, provided the copyright notice is
+retained.
 
 Copyright (c) 1997–2012 Robert Umbehant

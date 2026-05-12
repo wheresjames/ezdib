@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "ezdib.h"
 
@@ -122,19 +123,10 @@ static int test_create_overflow(void)
 {
     /* Dimensions that would overflow int when computing image size */
     CHECK(ezd_create(0x7fffffff, 0x7fffffff, 32, 0) == NULL, "huge image should fail");
+    CHECK(ezd_create(INT_MIN, -1, 24, 0) == NULL, "INT_MIN width should fail");
     CHECK(ezd_create(0, 10, 24, 0) == NULL, "zero width should fail");
     CHECK(ezd_create(10, 0, 24, 0) == NULL, "zero height should fail");
-    /* Drawing on an unsupported bpp image must fail gracefully (return 0),
-       even though ezd_create itself may succeed for any bpp that produces a
-       non-zero image size. */
-    {
-        HEZDIMAGE img = ezd_create(10, -10, 8, 0);
-        if (img) {
-            CHECK(ezd_set_pixel(img, 0, 0, 0xff) == 0,
-                  "set_pixel on unsupported bpp should return 0");
-            ezd_destroy(img);
-        }
-    }
+    CHECK(ezd_create(10, -10, 8, 0) == NULL, "unsupported bpp should fail");
     return 0;
 }
 
@@ -209,6 +201,30 @@ static int test_save_load_1bpp(void)
     CHECK(dst, "load returned NULL");
     CHECK(ezd_get_bpp(dst) == 1, "loaded image bpp wrong");
     ezd_destroy(src); ezd_destroy(dst);
+    remove(tmp_path);
+    return 0;
+}
+
+static int test_save_1bpp_file_size(void)
+{
+    FILE *fp;
+    unsigned char hdr[6];
+    unsigned int file_size;
+    HEZDIMAGE img = ezd_create(16, -16, 1, 0);
+    CHECK(img, "create failed");
+    tmp("1bpp_size");
+    CHECK(ezd_save(img, tmp_path), "save failed");
+    fp = fopen(tmp_path, "rb");
+    CHECK(fp != NULL, "open saved bmp failed");
+    CHECK(fread(hdr, 1, sizeof hdr, fp) == sizeof hdr, "short bmp header");
+    fclose(fp);
+    file_size = (unsigned int)hdr[2]
+              | ((unsigned int)hdr[3] << 8)
+              | ((unsigned int)hdr[4] << 16)
+              | ((unsigned int)hdr[5] << 24);
+    CHECKF(file_size == 14u + 40u + 8u + (unsigned int)ezd_get_image_size(img),
+           "wrong BMP file size: %u", file_size);
+    ezd_destroy(img);
     remove(tmp_path);
     return 0;
 }
@@ -765,6 +781,19 @@ static int test_font_load_medium(void)
     return 0;
 }
 
+static int test_font_rejects_malformed(void)
+{
+    static const char bad_short[] = { 'A', 8, 8, 0 };
+    static const char bad_unterminated[] = { 'A', 1, 1, 0x80 };
+    CHECK(ezd_load_font(bad_short, sizeof bad_short, 0) == NULL,
+          "short glyph bitmap should fail");
+    CHECK(ezd_load_font(bad_unterminated, sizeof bad_unterminated, 0) == NULL,
+          "unterminated font table should fail");
+    CHECK(ezd_load_font(bad_unterminated, 0, 0) == NULL,
+          "unsized custom font table should fail");
+    return 0;
+}
+
 static int test_text_renders_pixels(void)
 {
     HEZDIMAGE img = ezd_create(200, -20, 24, 0);
@@ -824,6 +853,23 @@ static int test_text_null_terminated(void)
     /* len=-1 means null-terminated; should draw the same as explicit len */
     CHECK(ezd_text(img, fnt, "HI", -1, 0, 2, 0xffffff), "text len=-1 failed");
     CHECK(count_set_pixels(img,0,0,100,20) > 0, "no pixels drawn");
+    ezd_destroy_font(fnt); ezd_destroy(img);
+    return 0;
+}
+
+static int test_text_bottom_up_top_edge(void)
+{
+    HEZDIMAGE img = ezd_create(100, 20, 24, 0);
+    HEZDFONT  fnt = ezd_load_font(EZD_FONT_TYPE_SMALL, 0, 0);
+    CHECK(img && fnt, "setup failed");
+    ezd_fill(img, 0);
+    CHECK(ezd_text(img, fnt, "HI", -1, 0, 0, 0xffffff),
+          "text at top edge should be a no-op, not a failure");
+    CHECK(count_set_pixels(img,0,0,100,20) == 0,
+          "top-edge bottom-up text should not draw out-of-bounds glyph");
+    CHECK(ezd_text(img, fnt, "HI", -1, 0, 6, 0xffffff),
+          "bottom-up text with enough space failed");
+    CHECK(count_set_pixels(img,0,0,100,20) > 0, "bottom-up text drew no pixels");
     ezd_destroy_font(fnt); ezd_destroy(img);
     return 0;
 }
@@ -1164,6 +1210,7 @@ static const Test tests[] = {
     { "save_load_24bpp",            test_save_load_24bpp            },
     { "save_load_32bpp",            test_save_load_32bpp            },
     { "save_load_1bpp",             test_save_load_1bpp             },
+    { "save_1bpp_file_size",        test_save_1bpp_file_size        },
     { "load_nonexistent",           test_load_nonexistent           },
     /* Pixels and colour */
     { "color_format",               test_color_format               },
@@ -1202,11 +1249,13 @@ static const Test tests[] = {
     /* Fonts and text */
     { "font_load_small",            test_font_load_small            },
     { "font_load_medium",           test_font_load_medium           },
+    { "font_rejects_malformed",     test_font_rejects_malformed     },
     { "text_renders_pixels",        test_text_renders_pixels        },
     { "text_size",                  test_text_size                  },
     { "text_size_wider",            test_text_size_wider_for_longer_string },
     { "text_newline",               test_text_newline               },
     { "text_null_terminated",       test_text_null_terminated       },
+    { "text_bottom_up_top_edge",    test_text_bottom_up_top_edge    },
     /* Scaling */
     { "scale_nearest_1to1_24bpp",   test_scale_nearest_1to1_24bpp  },
     { "scale_nearest_1to1_32bpp",   test_scale_nearest_1to1_32bpp  },

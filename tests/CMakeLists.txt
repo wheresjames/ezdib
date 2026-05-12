@@ -32,6 +32,7 @@ set(EZDIB_TESTS
     save_load_24bpp
     save_load_32bpp
     save_load_1bpp
+    save_1bpp_file_size
     load_nonexistent
     # Pixels and colour
     color_format
@@ -70,11 +71,13 @@ set(EZDIB_TESTS
     # Fonts and text
     font_load_small
     font_load_medium
+    font_rejects_malformed
     text_renders_pixels
     text_size
     text_size_wider
     text_newline
     text_null_terminated
+    text_bottom_up_top_edge
     # Scaling
     scale_nearest_1to1_24bpp
     scale_nearest_1to1_32bpp

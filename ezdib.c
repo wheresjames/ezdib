@@ -264,6 +264,45 @@ typedef struct _SImageData
 
 } SImageData;
 
+static int ezd_supported_bpp( int bpp )
+{
+    return bpp == 1 || bpp == 24 || bpp == 32;
+}
+
+static int ezd_abs_int64( int v, long long *out )
+{
+    if ( !out )
+        return 0;
+    *out = ( v < 0 ) ? -(long long)v : (long long)v;
+    return 1;
+}
+
+static int ezd_checked_image_size( int w, int h, int bpp, int *out_size )
+{
+    long long aw, ah, bits, bytes, scanw, size;
+
+    if ( !out_size || !w || !h || !ezd_supported_bpp( bpp ) )
+        return 0;
+
+    ezd_abs_int64( w, &aw );
+    ezd_abs_int64( h, &ah );
+
+    bits = aw * (long long)bpp;
+    if ( bits <= 0 || bits > 0x7fffffffLL * 8LL )
+        return 0;
+
+    bytes = ( bits + 7 ) / 8;
+    scanw = ( bytes + 3 ) & ~3LL;
+    if ( scanw > 0x7fffffffLL / ah )
+        return 0;
+    size = scanw * ah;
+    if ( size <= 0 || size > 0x7fffffffLL )
+        return 0;
+
+    *out_size = (int)size;
+    return 1;
+}
+
 #if !defined( EZD_STATIC_FONTS )
 
 // This structure contains the memory image
@@ -311,20 +350,8 @@ HEZDIMAGE ezd_initialize( void *x_pBuffer, int x_nBuffer, int x_lWidth, int x_lH
     if ( !x_pBuffer || ( 0 < x_nBuffer && sizeof( SImageData ) > x_nBuffer ) )
         return _ERR( (HEZDIMAGE)0, "Invalid header buffer" );
 
-    // Sanity check
-    if ( !x_lWidth || !x_lHeight )
-        return _ERR( (HEZDIMAGE)0, "Invalid parameters" );
-
-    // Guard against integer overflow before the int-width macro
-    {   long long sw64 = ( ( (long long)EZD_ABS( x_lWidth ) * x_lBpp + 7 ) / 8 + 3 ) & ~3LL;
-        long long sz64 = sw64 * (long long)EZD_ABS( x_lHeight );
-        if ( sz64 <= 0 || sz64 > 0x7fffffff )
-            return _ERR( (HEZDIMAGE)0, "Image dimensions too large" );
-    }
-    // Calculate image size
-    nImageSize = EZD_IMAGE_SIZE( x_lWidth, x_lHeight, x_lBpp, 4 );
-    if ( 0 >= nImageSize )
-        return _ERR( (HEZDIMAGE)0, "Invalid bits per pixel" );
+    if ( !ezd_checked_image_size( x_lWidth, x_lHeight, x_lBpp, &nImageSize ) )
+        return _ERR( (HEZDIMAGE)0, "Invalid image parameters" );
 
     // Point to users buffer
     p = (SImageData*)x_pBuffer;
@@ -370,20 +397,8 @@ HEZDIMAGE ezd_create( int x_lWidth, int x_lHeight, int x_lBpp, unsigned int x_uF
     if ( 0xffff0000 & x_uFlags )
         return _ERR( (HEZDIMAGE)0, "You have specified invalid flags" );
 
-    // Sanity check
-    if ( !x_lWidth || !x_lHeight )
-        return _ERR( (HEZDIMAGE)0, "Invalid image width or height" );
-
-    // Guard against integer overflow before the int-width macro
-    {   long long sw64 = ( ( (long long)EZD_ABS( x_lWidth ) * x_lBpp + 7 ) / 8 + 3 ) & ~3LL;
-        long long sz64 = sw64 * (long long)EZD_ABS( x_lHeight );
-        if ( sz64 <= 0 || sz64 > 0x7fffffff )
-            return _ERR( (HEZDIMAGE)0, "Image dimensions too large" );
-    }
-    // Calculate image size
-    nImageSize = EZD_IMAGE_SIZE( x_lWidth, x_lHeight, x_lBpp, 4 );
-    if ( 0 >= nImageSize )
-        return _ERR( (HEZDIMAGE)0, "Invalid bits per pixel" );
+    if ( !ezd_checked_image_size( x_lWidth, x_lHeight, x_lBpp, &nImageSize ) )
+        return _ERR( (HEZDIMAGE)0, "Invalid image parameters" );
 
     // Allocate memory; calloc zeroes the buffer so BMP padding bytes are clean
     p = (SImageData*)EZD_calloc( 1, sizeof( SImageData )
@@ -577,7 +592,7 @@ int ezd_save( HEZDIMAGE x_hDib, const char *x_pFile )
 
     // Fill in header info
     dfh.uMagicNumber = EZD_MAGIC_NUMBER;
-    dfh.uSize = sizeof( SDIBFileHeader ) + p->bih.biSize + p->bih.biSizeImage;
+    dfh.uSize = sizeof( SDIBFileHeader ) + p->bih.biSize + palette_size + p->bih.biSizeImage;
     dfh.uReserved1 = 0;
     dfh.uReserved2 = 0;
     dfh.uOffset = sizeof( SDIBFileHeader ) + p->bih.biSize + palette_size;
@@ -645,13 +660,8 @@ HEZDIMAGE ezd_load( const char *x_pFile )
          || bih.biWidth == 0 || bih.biHeight == 0 )
     {   fclose( fh ); return _ERR( (HEZDIMAGE)0, "Unsupported BMP format" ); }
 
-    // Overflow-safe image size calculation (same guard as ezd_create)
-    {   long long sw64 = ( ( (long long)EZD_ABS( bih.biWidth ) * bih.biBitCount + 7 ) / 8 + 3 ) & ~3LL;
-        long long sz64 = sw64 * (long long)EZD_ABS( bih.biHeight );
-        if ( sz64 <= 0 || sz64 > 0x7fffffff )
-        {   fclose( fh ); return _ERR( (HEZDIMAGE)0, "Image dimensions too large" ); }
-        nImageSize = (int)sz64;
-    }
+    if ( !ezd_checked_image_size( bih.biWidth, bih.biHeight, bih.biBitCount, &nImageSize ) )
+    {   fclose( fh ); return _ERR( (HEZDIMAGE)0, "Image dimensions too large" ); }
 
     // Allocate header struct + pixel buffer in one block (mirrors ezd_create)
     p = (SImageData*)EZD_calloc( 1, sizeof( SImageData ) + nImageSize );
@@ -1726,7 +1736,7 @@ int ezd_flood_fill( HEZDIMAGE x_hDib, int x, int y, int x_bcol, int x_col )
     if ( !p || sizeof( SBitmapInfoHeader ) != p->bih.biSize || !p->pImage )
         return _ERR( 0, "Invalid parameters" );
 
-    if ( 1 == p->bih.biBitCount )
+    if ( p->bih.biBitCount != 24 && p->bih.biBitCount != 32 )
         return 0;
 
     w = EZD_ABS( p->bih.biWidth );
@@ -2056,6 +2066,31 @@ const char* ezd_next_glyph( const char* pGlyph )
     return &pGlyph[ 3 + ( ( sz & 0x07 ) ? ( ( sz >> 3 ) + 1 ) : sz >> 3 ) ];
 }
 
+static int ezd_glyph_size_checked( const char *pGlyph, int remaining, int *out_size )
+{
+    int w, h, bits, bytes;
+
+    if ( !pGlyph || !out_size || remaining <= 0 )
+        return 0;
+
+    if ( !*pGlyph )
+    {   *out_size = 1; return 1; }
+
+    if ( remaining < 3 )
+        return 0;
+
+    w = (unsigned char)pGlyph[ 1 ];
+    h = (unsigned char)pGlyph[ 2 ];
+    bits = w * h;
+    bytes = ( bits + 7 ) / 8;
+
+    if ( bytes > remaining - 3 )
+        return 0;
+
+    *out_size = 3 + bytes;
+    return 1;
+}
+
 const char* ezd_find_glyph( HEZDFONT x_pFt, const char ch )
 {
 #if !defined( EZD_STATIC_FONTS )
@@ -2090,9 +2125,9 @@ HEZDFONT ezd_load_font( const void *x_pFt, int x_nFtSize, unsigned int x_uFlags 
 {
 #if !defined( EZD_STATIC_FONTS )
 
-    int i, sz;
+    int i, sz, off;
     SFontData *p;
-    const char *pGlyph, *pFt = (const char*)x_pFt;
+    const char *pFt = (const char*)x_pFt;
 
     // Font parameters
     if ( !pFt )
@@ -2110,18 +2145,25 @@ HEZDFONT ezd_load_font( const void *x_pFt, int x_nFtSize, unsigned int x_uFlags 
     else if ( (const char*)EZD_FONT_TYPE_LARGE == pFt )
         return 0;
 
-    /// Null terminated font buffer?
+    /// Custom font buffers must be sized so validation can stay in bounds.
     if ( 0 >= x_nFtSize )
-    {   x_nFtSize = 0;
-        while ( pFt[ x_nFtSize ] )
-        {   sz = pFt[ x_nFtSize + 1 ] * pFt[ x_nFtSize + 2 ];
-            x_nFtSize += 3 + ( ( sz & 0x07 ) ? ( ( sz >> 3 ) + 1 ) : sz >> 3 );
-        } // end while
-    } // end if
+        return _ERR( (HEZDFONT)0, "Font table size required" );
 
     // Sanity check
     if ( 0 >= x_nFtSize )
         return _ERR( (HEZDFONT)0, "Empty font table" );
+
+    off = 0;
+    while ( off < x_nFtSize )
+    {
+        if ( !ezd_glyph_size_checked( &pFt[ off ], x_nFtSize - off, &sz ) )
+            return _ERR( (HEZDFONT)0, "Invalid font table" );
+        if ( !pFt[ off ] )
+            break;
+        off += sz;
+    }
+    if ( off >= x_nFtSize || pFt[ off ] )
+        return _ERR( (HEZDFONT)0, "Unterminated font table" );
 
     // Allocate space for font buffer
     p = (SFontData*)EZD_malloc( sizeof( SFontData ) + x_nFtSize );
@@ -2139,10 +2181,13 @@ HEZDFONT ezd_load_font( const void *x_pFt, int x_nFtSize, unsigned int x_uFlags 
         p->pIndex[ i ] = p->pGlyph;
 
     // Index the glyphs
-    pGlyph = p->pGlyph;
-    while ( pGlyph && *pGlyph )
-        p->pIndex[ (unsigned int)*pGlyph & 0xff ] = pGlyph,
-        pGlyph = ezd_next_glyph( pGlyph );
+    off = 0;
+    while ( off < x_nFtSize && p->pGlyph[ off ] )
+    {
+        ezd_glyph_size_checked( &p->pGlyph[ off ], x_nFtSize - off, &sz );
+        p->pIndex[ (unsigned int)p->pGlyph[ off ] & 0xff ] = &p->pGlyph[ off ];
+        off += sz;
+    }
 
     // Return the font handle
     return (HEZDFONT)p;
@@ -2170,7 +2215,20 @@ HEZDFONT ezd_load_font( const void *x_pFt, int x_nFtSize, unsigned int x_uFlags 
 
     // Just use the users raw font table pointer
     else
-        return (HEZDFONT)x_pFt;
+    {
+        int off = 0, sz = 0;
+        if ( 0 >= x_nFtSize )
+            return _ERR( (HEZDFONT)0, "Font table size required" );
+        while ( off < x_nFtSize )
+        {
+            if ( !ezd_glyph_size_checked( (const char*)pFt + off, x_nFtSize - off, &sz ) )
+                return _ERR( (HEZDFONT)0, "Invalid font table" );
+            if ( !pFt[ off ] )
+                return (HEZDFONT)x_pFt;
+            off += sz;
+        }
+        return _ERR( (HEZDFONT)0, "Unterminated font table" );
+    }
 
 #endif
 }
@@ -2289,8 +2347,9 @@ static void ezd_draw_bmp_cb( unsigned char *pImg, int x, int y, int sw, int pw,
         // Reset x
         lx = x;
 
-        // Reset y
-        y++;
+        // Next row
+        if ( 0 < inv ) y++;
+        else           y--;
 
     } // end for
 
@@ -2317,7 +2376,8 @@ static void ezd_draw_bmp_1( unsigned char *pImg, int x, int y, int sw, int pw,
             mask >>= 1;
             if ( !mask ) { mask = 0x80; cur = (unsigned char)*pBmp++; }
         }
-        y++;
+        if ( 0 < inv ) y++;
+        else           y--;
     }
 }
 
@@ -2419,8 +2479,9 @@ int ezd_text( HEZDIMAGE x_hDib, HEZDFONT x_hFont, const char *x_pText, int x_nTe
         {
             // Draw this glyph if it's completely on the screen
             if ( pGlyph[ 1 ] && pGlyph[ 2 ]
-                 && 0 <= lx && ( lx + pGlyph[ 1 ] ) < w
-                 && 0 <= y && ( y + pGlyph[ 2 ] ) < h )
+                 && 0 <= lx && ( lx + pGlyph[ 1 ] ) <= w
+                 && ( ( 0 < inv && 0 <= y && ( y + pGlyph[ 2 ] ) <= h )
+                      || ( 0 > inv && 0 <= y && ( y - pGlyph[ 2 ] + 1 ) >= 0 ) ) )
             {
                 // Check for user callback function
                 if ( p->pfSetPixel )
@@ -2530,4 +2591,3 @@ double ezd_calc_range( int t, void *pData, int nData, double *pMin, double *pMax
 
     return 1;
 }
-
