@@ -25,6 +25,16 @@ or anywhere in between — with zero mandatory external dependencies.
 
 ---
 
+## Example
+
+### 1 BPP (1-bit) image
+![grplist performance guide](images/rt-1.png)
+
+### 32 BPP (32-bit) image
+![grplist performance guide](images/rt-32.png)
+
+---
+
 ## Quick Start
 
 ```c
