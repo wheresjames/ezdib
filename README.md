@@ -19,6 +19,7 @@ or anywhere in between — with zero mandatory external dependencies.
 - [Using your own pixel buffer](#using-your-own-pixel-buffer)
 - [Custom pixel callback (unbuffered output)](#custom-pixel-callback-unbuffered-output)
 - [Graph helpers](#graph-helpers)
+- [Comparison to Similar Projects](#comparison-to-similar-projects)
 - [License](#license)
 
 ---
@@ -660,6 +661,202 @@ coordinates.
 `EZD_TYPE_CHAR`, `EZD_TYPE_UCHAR`, `EZD_TYPE_SHORT`, `EZD_TYPE_USHORT`,
 `EZD_TYPE_INT`, `EZD_TYPE_UINT`, `EZD_TYPE_LONGLONG`,
 `EZD_TYPE_ULONGLONG`, `EZD_TYPE_FLOAT`, or `EZD_TYPE_DOUBLE`.
+
+---
+
+## Comparison to Similar Projects
+
+Several libraries cover parts of the same space: BMP file I/O, small
+software renderers, or broader image-processing toolkits.  The right
+choice depends on whether you need plain C, BMP-only output, drawing
+primitives, image processing, or support for many file formats.
+
+---
+
+### QDBMP
+
+[QDBMP](https://qdbmp.sourceforge.net/) is a small C library for BMP file
+I/O.  It consists of two source files, uses only the standard C library,
+and supports uncompressed 8, 24, and 32 bpp BMP variants.
+
+Key differences:
+
+- QDBMP is focused on loading, creating, editing, and saving BMP images.
+  It does not try to be a drawing-primitives library.
+- QDBMP supports 8 bpp indexed BMP files; ezdib supports 1 bpp instead.
+- ezdib includes drawing operations such as lines, rectangles, circles,
+  arcs, flood fill, scaling, and bitmap text.
+- Both projects are small C libraries with minimal dependencies.
+
+Choose QDBMP if you mainly need simple BMP I/O in C, especially 8 bpp
+BMP support.
+
+Choose ezdib if you need to generate images procedurally with built-in
+drawing primitives and can work with 1, 24, or 32 bpp uncompressed BMPs.
+
+---
+
+### EasyBMP
+
+[EasyBMP](https://easybmp.sourceforge.net/) is a C++ BMP library designed
+for reading, writing, and modifying uncompressed BMP files.  It supports
+1, 4, 8, 16, 24, and 32 bpp BMP files.
+
+Key differences:
+
+- EasyBMP supports more BMP bit depths than ezdib.
+- EasyBMP is C++; ezdib is C.
+- EasyBMP is primarily a BMP I/O and pixel-editing library.  ezdib has a
+  smaller BMP-format surface but includes drawing primitives and text.
+- EasyBMP is documented for both little-endian and big-endian systems;
+  ezdib writes BMP structs directly after runtime packing checks.
+
+Choose EasyBMP if you are writing C++ and need broad uncompressed BMP
+format support.
+
+Choose ezdib if you need a small C renderer for generating BMPs from
+primitives or drawing into a caller-supplied framebuffer.
+
+---
+
+### C++ Bitmap Library
+
+The [C++ Bitmap Library](https://www.partow.net/programming/bitmap/idx.html)
+is a single-header C++ library for 24 bpp BMP images.  It includes BMP
+I/O, pixel access, drawing primitives, resizing, colour maps, texture
+generation, and canvas-style helpers.
+
+Key differences:
+
+- C++ Bitmap Library has a broader image-processing and canvas feature
+  set than ezdib.
+- It is limited to 24 bpp BMP images; ezdib supports 1, 24, and 32 bpp.
+- It is C++; ezdib is C and exposes an opaque handle API.
+- ezdib has explicit support for user-supplied buffers and pixel
+  callbacks, which is useful for embedded or display-driver targets.
+
+Choose C++ Bitmap Library if you are using C++ and want a richer
+single-header 24 bpp BMP toolkit.
+
+Choose ezdib if you want a smaller C API, 1 bpp output, or unbuffered
+pixel callbacks.
+
+---
+
+### BitmapPlusPlus
+
+[BitmapPlusPlus](https://github.com/baderouaich/BitmapPlusPlus) is a
+header-only C++ BMP library.  It supports 24 bpp RGB BMPs and includes
+examples for pixel editing and drawing primitives.
+
+Key differences:
+
+- BitmapPlusPlus is header-only C++; ezdib is a C header plus source file.
+- BitmapPlusPlus is centered on 24 bpp BMPs; ezdib supports 1, 24, and
+  32 bpp.
+- BitmapPlusPlus includes CMake/FetchContent integration.  ezdib is aimed
+  at direct source inclusion and also has a small CMake demo/test build.
+- ezdib includes font rendering, flood fill, scaling, and callback-based
+  output in the core API.
+
+Choose BitmapPlusPlus if you want a modern C++ header-only BMP helper
+for 24 bpp images.
+
+Choose ezdib if you need a C API or the specific 1 bpp, callback, and
+embedded-oriented paths.
+
+---
+
+### CGL
+
+[CGL](https://github.com/Jaysmito101/cgl) is a C graphics/game utility
+library.  It is a single-header style project with optional components
+for windowing, widgets, OpenGL rendering, text rendering, audio,
+networking, math, and other utilities.
+
+Key differences:
+
+- CGL is a broad graphics/game-development toolkit.  ezdib is narrowly
+  focused on BMP images and simple software drawing.
+- CGL has optional windowing, widgets, OpenGL, FreeType text, audio, and
+  networking components.  ezdib has no windowing or GPU layer.
+- ezdib writes uncompressed BMP files directly and can draw into a
+  caller-supplied pixel buffer or callback.  CGL is aimed more at
+  interactive graphics, demos, and application/game experiments.
+- Both projects are written in C and are designed to be embedded in
+  small projects, but their scopes are very different.
+
+Choose CGL if you want a broader C graphics toolkit with optional
+windowing, widgets, GPU rendering, and game/demo utilities.
+
+Choose ezdib if you only need deterministic software drawing into BMPs
+or simple framebuffers.
+
+---
+
+### CImg
+
+[CImg](https://cimg.eu/) is a much larger single-header C++ image
+processing library.  It supports image loading, saving, display,
+filtering, transforms, drawing primitives, text, and generic pixel types.
+Optional dependencies add support for compressed formats and other
+features.
+
+Key differences:
+
+- CImg is a general image-processing toolkit; ezdib is a small BMP
+  drawing library.
+- CImg supports many more operations and data models, including images
+  with more dimensions and generic pixel types.
+- CImg is C++; ezdib is C.
+- ezdib is easier to audit and embed when the output target is just an
+  uncompressed BMP or a simple framebuffer.
+
+Choose CImg if you need substantial image processing, many algorithms,
+or optional support for common compressed formats.
+
+Choose ezdib if you need a small, dependency-light C library for drawing
+simple raster output.
+
+---
+
+### GD Graphics Library
+
+[GD](https://libgd.github.io/) is a mature C graphics library for dynamic
+image creation.  It can draw shapes and text and can write common image
+formats such as PNG and JPEG when built with the relevant dependencies.
+
+Key differences:
+
+- GD supports many more output formats and font/image features than
+  ezdib.
+- GD is a linked library with optional external dependencies.  ezdib is
+  intended to be dropped into a project as one `.c` and one `.h` file.
+- GD is a better fit for web/server-side image generation where PNG,
+  JPEG, alpha blending, or richer text support matter.
+- ezdib is a better fit for tiny tools, BMP-only output, and environments
+  where external dependencies are undesirable.
+
+Choose GD if you need production-grade dynamic image generation in common
+web image formats.
+
+Choose ezdib if BMP output is acceptable and small source-level
+integration matters more than format breadth.
+
+---
+
+### Summary
+
+| Project | Language | Main focus | File formats | Drawing primitives | Relative scope |
+|---------|----------|------------|--------------|--------------------|----------------|
+| ezdib | C | Small BMP drawing and framebuffer-style output | BMP: 1, 24, 32 bpp uncompressed | Yes | Small |
+| QDBMP | C | Minimal BMP I/O | BMP: 8, 24, 32 bpp uncompressed | No | Small |
+| EasyBMP | C++ | BMP I/O and pixel editing | BMP: 1, 4, 8, 16, 24, 32 bpp uncompressed | Limited / pixel-level | Small-medium |
+| C++ Bitmap Library | C++ | 24 bpp BMP processing and drawing | BMP: 24 bpp | Yes | Medium |
+| BitmapPlusPlus | C++ | Header-only 24 bpp BMP helper | BMP: 24 bpp | Yes | Small-medium |
+| CGL | C | Graphics/game utility toolkit | Not BMP-focused | Yes | Large |
+| CImg | C++ | General image processing | Many, depending on build/options | Yes | Large |
+| GD | C | Dynamic image generation | PNG/JPEG/GIF/WebP/etc. depending on build | Yes | Medium-large |
 
 ---
 
